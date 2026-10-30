@@ -50,6 +50,96 @@ select a short temporary directory you own and set `TMPDIR` for the command.
 On Windows run this particular smoke check inside WSL or a Linux development
 container. It does not certify the Windows/macOS installer.
 
+## Run the full app from source
+
+`npm run dev:stack` starts a working SpaceApp from this checkout with hot
+reload. It never touches an installed SpaceApp: it has its own compose project
+(`spaceapp-dev-stack`), its own git-ignored state directory (`.dev-stack/`)
+and its own ports, and every port it opens binds to `127.0.0.1` only.
+
+Prerequisites: the Node and npm versions above, `npm ci` done, and Docker with
+the Compose plugin (`docker compose version`). Docker runs only PostgreSQL
+(pgvector) and Temporal, with the images and digests pinned in
+`packages/run-spaceapp/templates/compose.yml` (read from that file at start).
+
+```sh
+npm run dev:stack            # start; prints the URL and the one-time owner setup token
+npm run dev:stack -- down    # stop the processes and containers, keep the data
+npm run dev:stack -- reset   # remove the containers, volumes and .dev-stack/ it created
+npm run dev:stack -- rebuild # rebuild packages/* and restart the API, worker and CLI host
+npm run dev:stack -- status
+```
+
+In order, `dev:stack` starts PostgreSQL and Temporal and waits for their
+health checks, builds the workspace packages, runs the migrations, installs the
+OpenCode version pinned in the `Dockerfile` into `.dev-stack/cli/vendor/` (not
+globally), and then runs from source, each with its own prefix in the output:
+
+| Process | What runs | Reload |
+| --- | --- | --- |
+| `[api]` | `tsx watch apps/api/src/server.ts` | restarts on a change in `apps/api/src` |
+| `[worker-build]`, `[worker]` | `tsc --watch` and `node --watch dist/worker.js` | restarts on a change in `apps/worker/src` |
+| `[web]` | Vite dev server | hot reload in the browser for `apps/web/src` |
+| `[cli-host]` | `packages/cli-host/dist/main.js` on `.dev-stack/run/cli-host.sock` | `rebuild` |
+
+A change in `packages/*` is picked up with `npm run dev:stack -- rebuild` in a
+second terminal: it builds the packages and the running stack restarts the
+processes that load them.
+
+Open the printed URL, enter the setup token, create the owner and sign in
+(the dev-login shortcut is off). The Getting Started room opens; an OpenCode
+pane starts through the from-source CLI host with the same wrapper as the
+image (`deploy/docker/public-cli-wrapper.sh`, pointed at `.dev-stack/cli/`).
+OpenCode's free model needs no provider account. The browser service and the
+optional companions stay disabled.
+
+Ports (environment variables; the defaults are never 4910/4911):
+
+| Variable | Default |
+| --- | --- |
+| `SPACE_DEV_STACK_WEB_PORT` (open this one) | 4921 |
+| `SPACE_DEV_STACK_API_PORT` | 4920 |
+| `SPACE_DEV_STACK_POSTGRES_PORT` | 4922 |
+| `SPACE_DEV_STACK_TEMPORAL_PORT` | 4923 |
+
+`SPACE_DEV_STACK_DIR` moves the state directory and `SPACE_DEV_STACK_PROJECT`
+renames the compose project. The database password, session secret and setup
+token are generated once per state directory in `.dev-stack/secrets/` with
+mode 0600; only the setup token is printed. `SPACE_*` variables of your shell
+are not passed to the processes.
+
+If a process exits, `dev:stack` names it (`dev-stack: worker exited
+unexpectedly ...`) and stops the stack. While it runs it checks `/readyz` and
+prints the dependency that fails (for example `worker=ERROR`).
+
+Troubleshooting:
+
+- *Port ... is in use*: set the matching `SPACE_DEV_STACK_*_PORT`.
+- *The dev stack is already running*: `npm run dev:stack -- down` first.
+- */readyz did not report ok*: the last line names the failing dependency;
+  `docker compose --project-name spaceapp-dev-stack --file .dev-stack/compose.yml logs`
+  shows the PostgreSQL and Temporal side.
+- *was not created by dev:stack*: `SPACE_DEV_STACK_DIR` names a directory that
+  already holds other files; `dev:stack` never uses or removes it.
+- A deep checkout path puts the CLI host socket in a private directory under
+  `TMPDIR` (Unix sockets are limited to about 100 bytes).
+
+Platform notes:
+
+- **Linux**: Docker Engine with the Compose plugin.
+- **macOS**: Docker Desktop, or Colima (`colima start`, then `docker context use colima`).
+  The ports are published on the Mac's `127.0.0.1`.
+- **Windows 11**: run everything inside WSL2 (Ubuntu), with the checkout on the
+  Linux file system (`~/src/spaceapp`, not `/mnt/c/...`, for file watching and
+  speed) and Docker Desktop's WSL integration or Docker Engine inside WSL.
+  Open the URL in a Windows browser; WSL forwards `127.0.0.1`. Native Windows is
+  refused with a message.
+
+The `Dev stack` CI workflow runs `scripts/dev-stack-ci.mjs` on `ubuntu-latest`:
+it starts the stack without a TTY, waits for `/readyz`, creates the owner over
+HTTP, opens an OpenCode pane through the API, checks that it runs, then runs
+`reset` and checks that no container, volume or process is left.
+
 ## Make and verify a small change
 
 Work on a branch, not on `main`, so the change can become a pull request:

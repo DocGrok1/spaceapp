@@ -9,6 +9,8 @@ coverage/
 playwright-report/
 test-results/
 scratch/
+# npm run dev:stack state: secrets, provider homes, OpenCode install (reset removes it).
+/.dev-stack/
 .npm/
 apps/desktop/release/*-unpacked/
 apps/desktop/release/*.7z

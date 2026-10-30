@@ -1,0 +1,59 @@
+name: Dev stack
+
+# npm run dev:stack (#65): the whole app from source on a clean runner, without a TTY.
+on:
+  pull_request:
+    paths:
+      - "scripts/dev-stack*.mjs"
+      - "scripts/tests/dev-stack.test.mjs"
+      - "apps/**"
+      - "packages/**"
+      - "deploy/docker/**"
+      - "Dockerfile"
+      - "package.json"
+      - "package-lock.json"
+      - ".github/workflows/dev-stack.yml"
+  push:
+    branches:
+      - main
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+concurrency:
+  group: dev-stack-${{ github.ref }}
+  cancel-in-progress: true
+
+jobs:
+  dev-stack:
+    name: dev:stack up, owner setup, OpenCode pane, reset
+    runs-on: ubuntu-latest
+    timeout-minutes: 45
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          persist-credentials: false
+
+      - uses: actions/setup-node@49933ea5288caeca8642d1e84afbd3f7d6820020 # v4.4.0
+        with:
+          node-version-file: .nvmrc
+          cache: npm
+
+      - name: Install dependencies
+        env:
+          ELECTRON_SKIP_BINARY_DOWNLOAD: "1"
+        run: npm ci
+
+      - name: Dev-stack unit tests
+        run: node --test scripts/tests/dev-stack.test.mjs
+
+      - name: Run the stack, set up the owner, open an OpenCode pane, reset
+        run: node scripts/dev-stack-ci.mjs < /dev/null
+
+      - name: Nothing of the dev stack is left
+        if: always()
+        run: |
+          test -z "$(docker ps -aq --filter label=com.oll4com.spaceapp.dev-stack)"
+          test -z "$(docker volume ls -q --filter label=com.oll4com.spaceapp.dev-stack)"
+          test ! -e .dev-stack

@@ -1,7 +1,7 @@
 // @vitest-environment node
 
 import { describe, expect, it } from "vitest";
-import { manualChunkForModule } from "../vite.config.js";
+import { devApiOrigin, manualChunkForModule } from "../vite.config.js";
 
 describe("web bundle chunk policy", () => {
   it("isolates React and xterm while leaving feature modules available for lazy chunks", () => {
@@ -14,5 +14,14 @@ describe("web bundle chunk policy", () => {
     expect(manualChunkForModule("/workspace/node_modules/zod/v4/core/index.js")).toBe("vendor-validation");
     expect(manualChunkForModule("/workspace/node_modules/graphology/dist/graphology.js")).toBeUndefined();
     expect(manualChunkForModule("/workspace/src/features/browser-pane/BrowserPane.tsx")).toBeUndefined();
+  });
+});
+
+describe("dev server API proxy", () => {
+  it("targets the installed API port by default and the dev-stack API when SPACE_WEB_API_ORIGIN names it", () => {
+    expect(devApiOrigin({})).toBe("http://127.0.0.1:4910");
+    expect(devApiOrigin({ SPACE_WEB_API_ORIGIN: "http://127.0.0.1:4920" })).toBe("http://127.0.0.1:4920");
+    expect(() => devApiOrigin({ SPACE_WEB_API_ORIGIN: "http://0.0.0.0:4920" })).toThrow(/127\.0\.0\.1/);
+    expect(() => devApiOrigin({ SPACE_WEB_API_ORIGIN: "https://example.com" })).toThrow();
   });
 });

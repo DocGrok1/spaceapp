@@ -40,7 +40,8 @@ export function toolCycleSucceeded(result,token) {
   const answer=list.findIndex((e,i)=>i>tool&&e.type==='text'&&e.part?.text?.includes(token));
   return answer>tool;
 }
-const MEMORY_DIRECTORY='/var/lib/spaceapp/memory';
+// npm run dev:stack runs the wrapper outside the container and names its own memory directory.
+const MEMORY_DIRECTORY=process.env.SPACE_MEMORY_ROOT||'/var/lib/spaceapp/memory';
 // The 1.1.x default. Configs that still carry exactly this value get the new
 // default; any other value is an owner policy and is preserved.
 const LEGACY_EXTERNAL_DIRECTORY={'*':'ask',[MEMORY_DIRECTORY]:'allow',[`${MEMORY_DIRECTORY}/*`]:'allow'};
