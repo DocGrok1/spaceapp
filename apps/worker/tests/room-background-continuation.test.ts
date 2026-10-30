@@ -35,6 +35,21 @@ describe("durable background continuation", () => {
     expect(prepared.item.turn.prompt.length).toBeLessThanOrEqual(8000);
   });
 
+  it("starts a new trace for the continuation and keeps a link to the request it continues", async () => {
+    const source = `00-${"a".repeat(32)}-${"b".repeat(16)}-01`;
+    const c = continuationFixture("OPEN_TYPES", source);
+    const prepared = await prepareBackgroundContinuation(c.input, c.store);
+    if (prepared.state !== "READY") throw Error("Missing continuation");
+    expect(prepared.item.turn.traceId).toBe("trace:bg-test-1");
+    expect(prepared.item.turn.traceparent).toBeUndefined();
+    expect(prepared.item.turn.roomAgentContinuation).toEqual({ sourceRunId: "agent_run:initial", generation: 1, sourceTraceparent: source });
+    // Without a traced source the continuation carries no link.
+    const plain = continuationFixture();
+    const untraced = await prepareBackgroundContinuation(plain.input, plain.store);
+    if (untraced.state !== "READY") throw Error("Missing continuation");
+    expect(untraced.item.turn.roomAgentContinuation).toEqual({ sourceRunId: "agent_run:initial", generation: 1 });
+  });
+
   it("retains totals beyond the detail window and emits intact bounded JSON", () => {
     const c = continuationFixture();
     const actions = Array.from({ length: 80 }, (_, index) => ({ ...c.action, actionId: `action:${index}`,

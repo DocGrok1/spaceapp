@@ -182,11 +182,15 @@ describe("worker metrics endpoint", () => {
   });
 });
 
-it("registers the activity interceptor on every Temporal worker, including both memory workers", async () => {
+it("registers the activity interceptor and OTLP tracing on every Temporal worker, including both memory workers", async () => {
   const { readFile } = await import("node:fs/promises");
   for (const entry of ["worker.ts", "memory-maintenance-worker.ts", "memory-mutation-worker.ts"]) {
     const source = await readFile(new URL(`../src/${entry}`, import.meta.url), "utf8");
-    expect(source, entry).toMatch(/interceptors: \{ activity: \[createActivityObservabilityInterceptors\(\{ spans \}\)\] \}/);
+    // workerTracingOptions installs createActivityObservabilityInterceptors({ spans }) and,
+    // with export on, the workflow interceptor module and its sink (worker-tracing.ts).
+    expect(source, entry).toMatch(/const spans = otlpSpanExporterFromEnv\(process\.env, /);
+    expect(source, entry).toMatch(/\.\.\.workerTracingOptions\(spans\)/);
+    expect(source, entry).toMatch(/await spans\?\.close\(\)/);
   }
 });
 

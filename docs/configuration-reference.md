@@ -52,3 +52,23 @@ background work, and is hidden in the web app. Public installs upgraded from
 1.1.x that used Job Copilot, the games, channels, Telegram or the desktop
 routes set the modules they keep, for example
 `SPACE_OPTIONAL_MODULES=job-copilot,games`.
+
+## OTLP trace export
+
+`SPACE_OTEL_EXPORTER_OTLP_ENDPOINT` names an OTLP/HTTP collector base URL, for
+example `http://127.0.0.1:4318`; spans are posted as JSON to `<base>/v1/traces`.
+It is off when unset or when the value is not a plain `http:`/`https:` URL
+(credentials, query strings and fragments are rejected). The same variable is
+read by the API (`space-api`) and by every Temporal worker process:
+`space-worker`, `space-memory-maintenance-worker` and
+`space-memory-mutation-worker` (the `service.name` of their spans). Set it for
+each service that should export. With it unset a worker registers no workflow
+interceptor and no sink, and its activity records are unchanged.
+
+Export is best effort and needs no OpenTelemetry dependency
+(`packages/runtime/src/otlp-span-exporter.ts`, shared by the API and the
+workers): a bounded queue (4096 spans) drops and counts spans instead of
+growing, each POST has a 3 s timeout, and a slow or failing collector never
+delays or fails a request, workflow or activity. Every recorded span is exported
+(no sampling). What the spans contain is described in
+[observability](quality/observability.md#traces-w3c-trace-context).

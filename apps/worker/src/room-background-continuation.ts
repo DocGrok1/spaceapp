@@ -122,10 +122,18 @@ maxMissionTokens: number | null = DEFAULT_ROOM_AGENT_MAX_MISSION_TOKENS): Promis
   ].join("\n");
   const prefix = `${instructions}\n\nOperator request:\n${request}\n\nSettled action results (bounded; inspect for details):\n`;
   const prompt = prefix + continuationEvidence(actions, Math.max(0, 8000 - prefix.length));
+  // A continuation is a new trace (trace:bg-<id>) with an OTLP span link to the
+  // operator request it continues; it does not reuse that request's
+  // traceparent as its parent. Later generations keep linking to the same request.
+  const { traceparent: sourceRequestTraceparent, ...sourceTurn } = source.queueItem.turn;
+  const sourceTraceparent = sourceRequestTraceparent ?? source.queueItem.turn.roomAgentContinuation?.sourceTraceparent;
   const item = roomAgentSupervisorQueueItemSchema.parse({ missionId: input.missionId, turn: {
-    ...source.queueItem.turn,
+    ...sourceTurn,
     prompt, roomAgentOperatorRequest: request,
-    roomAgentContinuation: { sourceRunId: source.run.runId, generation },
+    roomAgentContinuation: {
+      sourceRunId: source.run.runId, generation,
+      ...(sourceTraceparent ? { sourceTraceparent } : {})
+    },
     artifactIds: [], agentRunId: runId,
     agentUserMessageId: `agent_msg:bg-context-${input.continuationId}`,
     agentAssistantMessageId: `agent_msg:bg-response-${input.continuationId}`,

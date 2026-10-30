@@ -6909,7 +6909,10 @@ export const dummyTurnInputSchema = z.object({
   roomAgentOperatorRequest: z.string().trim().min(1).max(4000).optional(),
   roomAgentContinuation: z.object({
     sourceRunId: idSchema,
-    generation: z.number().int().min(1).max(16)
+    generation: z.number().int().min(1).max(16),
+    // Optional W3C trace context of the turn this continuation continues; the
+    // continuation starts its own trace and exports an OTLP span link to it.
+    sourceTraceparent: traceparentSchema.optional()
   }).optional(),
   agentUserMessageId: idSchema.optional(),
   agentAssistantMessageId: idSchema.optional(),

@@ -1,5 +1,6 @@
 /**
- * Optional OTLP/HTTP (JSON) export of API server spans and worker activity spans. Off unless
+ * Optional OTLP/HTTP (JSON) export of API server spans and worker workflow and
+ * activity spans. The API and all three Temporal workers share this module. Off unless
  * SPACE_OTEL_EXPORTER_OTLP_ENDPOINT names a collector base URL (spans go to
  * `<base>/v1/traces`). No dependency, no collector required: Space logs stay
  * joinable by W3C trace id without it.
@@ -10,6 +11,13 @@
  * growing, each POST has a timeout, and a failing collector never affects a
  * request.
  */
+
+/** An OTLP span link: a causal reference to a span in this or another trace. */
+export interface SpanLink {
+  traceId: string;
+  spanId: string;
+  attributes?: Readonly<Record<string, string | number>>;
+}
 
 export interface ServerSpan {
   traceId: string;
@@ -22,6 +30,11 @@ export interface ServerSpan {
   error: boolean;
   /** OTLP span kind; SERVER (2) unless given. Worker activities use INTERNAL (1). */
   kind?: number;
+  /**
+   * Optional OTLP span links (continue-as-new runs, background continuations).
+   * Omitted from the request when absent, so API spans are serialized as before.
+   */
+  links?: readonly SpanLink[];
 }
 
 export interface SpanExporterStats {
@@ -85,6 +98,11 @@ export function otlpTraceRequest(spans: readonly ServerSpan[], serviceName: stri
           startTimeUnixNano: span.startTimeUnixNano.toString(),
           endTimeUnixNano: span.endTimeUnixNano.toString(),
           attributes: Object.entries(span.attributes).map(([key, value]) => ({ key, value: attributeValue(value) })),
+          ...(span.links?.length ? { links: span.links.map(link => ({
+            traceId: link.traceId,
+            spanId: link.spanId,
+            attributes: Object.entries(link.attributes ?? {}).map(([key, value]) => ({ key, value: attributeValue(value) }))
+          })) } : {}),
           // STATUS_CODE_ERROR or STATUS_CODE_UNSET
           status: { code: span.error ? 2 : 0 }
         }))
@@ -121,15 +139,20 @@ export function createOtlpSpanExporter(options: OtlpSpanExporterOptions): SpanEx
     }
   };
   const flush = (): Promise<void> => {
-    if (!inFlight) {
-      inFlight = (async () => {
-        try {
-          while (queue.length) await flushOnce();
-        } finally {
-          inFlight = null;
-        }
-      })();
-    }
+    if (inFlight) return inFlight;
+    // An empty queue must not leave a settled promise behind as "in flight":
+    // the async body would clear inFlight before it was assigned, and every
+    // later flush (timer, full batch, close) would then be a no-op.
+    if (!queue.length) return Promise.resolve();
+    // The queue is not empty, so the body awaits before its finally block and
+    // inFlight is always assigned before it is cleared.
+    inFlight = (async () => {
+      try {
+        while (queue.length) await flushOnce();
+      } finally {
+        inFlight = null;
+      }
+    })();
     return inFlight;
   };
   const timer = setInterval(() => void flush(), options.flushIntervalMs ?? 5000);
@@ -138,6 +161,9 @@ export function createOtlpSpanExporter(options: OtlpSpanExporterOptions): SpanEx
   return {
     record(span) {
       if (!traceIdPattern.test(span.traceId) || !spanIdPattern.test(span.spanId)) return;
+      if (span.links?.some(link => !traceIdPattern.test(link.traceId) || !spanIdPattern.test(link.spanId))) {
+        span = { ...span, links: span.links.filter(link => traceIdPattern.test(link.traceId) && spanIdPattern.test(link.spanId)) };
+      }
       if (queue.length >= maxQueue) {
         stats.dropped += 1;
         return;

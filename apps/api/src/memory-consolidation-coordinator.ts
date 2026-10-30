@@ -6,6 +6,14 @@ import {
   type MemoryConsolidationWorkflowInput
 } from "@space/contracts";
 import { SpaceFeatureDisabledError } from "@space/runtime";
+import { traceparentForTraceId, workflowCorrelationMemo } from "./trace-context.js";
+
+// Only when the starting request's trace context is known (an API request in
+// flight); otherwise the start options are unchanged.
+function correlationMemo(traceId: string): { memo?: Record<string, string> } {
+  const traceparent = traceparentForTraceId(traceId);
+  return traceparent ? { memo: workflowCorrelationMemo({ traceId, traceparent }) } : {};
+}
 
 export { MEMORY_CONSOLIDATION_TASK_QUEUE, MEMORY_CONSOLIDATION_WORKFLOW_TYPE };
 
@@ -46,6 +54,8 @@ export async function scheduleMemoryConsolidation(
   try {
     const handle = await startWorkflow(MEMORY_CONSOLIDATION_WORKFLOW_TYPE, {
       args: [input],
+      // Correlation ids and the starting request's W3C context (worker spans).
+      ...correlationMemo(input.traceId),
       taskQueue: MEMORY_CONSOLIDATION_TASK_QUEUE,
       workflowId,
       workflowIdReusePolicy: "REJECT_DUPLICATE",

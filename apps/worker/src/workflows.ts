@@ -39,6 +39,7 @@ import {
 } from "./room-supervisor-state.js";
 import { isCliChatTurnProviderId, isNativeChatTurn, NATIVE_CHAT_TURN_ACTIVITY_TIMEOUT } from "./turn-runtime-policy.js";
 import { runDotGoalLoop } from "./dot-goal-loop.js";
+import { traceWorkflowScope } from "./workflow-tracing.js";
 
 const { recordDummyTurnStarted, recordDummyTurnCompleted } = proxyActivities<typeof activities>({
   startToCloseTimeout: "1 minute",
@@ -317,39 +318,43 @@ async function continuingRoomAgentSupervisorWorkflow(rawInput: RoomAgentSupervis
       scope = new CancellationScope({ cancellable: true });
       stopReason = "Stopped by operator.";
       let paused = false;
-      try {
-        await scope.run(async () => {
-          const state = await supervisorActivities.checkRoomAgentSupervisorTurn(item);
-          if (state === "PAUSED") { paused = true; return; }
-          if (state === "SKIP") {
-            await supervisorActivities.discardRoomAgentSupervisorTurn({ item, reason: "Turn is no longer active or was superseded." });
-            return;
-          }
-          const result = await executeChild(codexAppServerTurnWorkflow, {
-            args: [item.turn], workflowId: buildCodexAppServerTurnWorkflowId(item.turn),
-            cancellationType: ChildWorkflowCancellationType.WAIT_CANCELLATION_COMPLETED
+      // One span per mission turn in the trace of the request that queued it
+      // (a no-op without OTLP export; it does no I/O and issues no commands).
+      await traceWorkflowScope({ name: "mission", traceparent: item.turn.traceparent, args: [item] }, async () => {
+        try {
+          await scope!.run(async () => {
+            const state = await supervisorActivities.checkRoomAgentSupervisorTurn(item);
+            if (state === "PAUSED") { paused = true; return; }
+            if (state === "SKIP") {
+              await supervisorActivities.discardRoomAgentSupervisorTurn({ item, reason: "Turn is no longer active or was superseded." });
+              return;
+            }
+            const result = await executeChild(codexAppServerTurnWorkflow, {
+              args: [item.turn], workflowId: buildCodexAppServerTurnWorkflowId(item.turn),
+              cancellationType: ChildWorkflowCancellationType.WAIT_CANCELLATION_COMPLETED
+            });
+            const completion = roomAgentMissionCompletion(result);
+            if (result.roomAgentOutcome?.status === "VERIFIED" && result.roomAgentOutcome.pendingActionIds?.length) {
+              monitoring.add(item.missionId);
+            } else if (completion.status === "COMPLETED" && monitoring.has(item.missionId) && !item.turn.roomAgentContinuation) {
+              // A FIND/layout follow-up can finish while earlier pane tasks continue.
+            } else if (!roomAgentMissionHasContinuation(pending, item.missionId)) {
+              monitoring.delete(item.missionId);
+              await supervisorActivities.finishRoomAgentSupervisorTurn({ item, ...completion });
+            }
           });
-          const completion = roomAgentMissionCompletion(result);
-          if (result.roomAgentOutcome?.status === "VERIFIED" && result.roomAgentOutcome.pendingActionIds?.length) {
-            monitoring.add(item.missionId);
-          } else if (completion.status === "COMPLETED" && monitoring.has(item.missionId) && !item.turn.roomAgentContinuation) {
-            // A FIND/layout follow-up can finish while earlier pane tasks continue.
-          } else if (!roomAgentMissionHasContinuation(pending, item.missionId)) {
-            monitoring.delete(item.missionId);
-            await supervisorActivities.finishRoomAgentSupervisorTurn({ item, ...completion });
-          }
-        });
-      } catch (error) {
-        await CancellationScope.nonCancellable(async () => {
-          const reason = isCancellation(error) ? stopReason : "Room Agent supervisor turn failed.";
-          const errorCode = isCancellation(error) ? undefined : supervisorFailureCode(error);
-          await supervisorActivities.discardRoomAgentSupervisorTurn({ item, reason, errorCode });
-          if (!roomAgentMissionHasContinuation(pending, item.missionId)) {
-            monitoring.delete(item.missionId);
-            await supervisorActivities.finishRoomAgentSupervisorTurn({ item, status: errorCode ? "FAILED" : "INTERRUPTED", statusReason: reason, errorCode });
-          }
-        });
-      } finally { active = null; scope = null; processedCount++; }
+        } catch (error) {
+          await CancellationScope.nonCancellable(async () => {
+            const reason = isCancellation(error) ? stopReason : "Room Agent supervisor turn failed.";
+            const errorCode = isCancellation(error) ? undefined : supervisorFailureCode(error);
+            await supervisorActivities.discardRoomAgentSupervisorTurn({ item, reason, errorCode });
+            if (!roomAgentMissionHasContinuation(pending, item.missionId)) {
+              monitoring.delete(item.missionId);
+              await supervisorActivities.finishRoomAgentSupervisorTurn({ item, status: errorCode ? "FAILED" : "INTERRUPTED", statusReason: reason, errorCode });
+            }
+          });
+        } finally { active = null; scope = null; processedCount++; }
+      });
       if (paused) {
         pending.push(item);
         const revision = signalRevision;
