@@ -1,0 +1,16 @@
+== turn trace fe22501429e91f34c2e2675a6eac99ac (4 spans, services: ['space-api', 'space-worker'])
+  +     0.0ms   1396.1ms  space-api                        POST /api/demo/turn                        <- (root)                                 outcome=- attempt=- reason=-
+  +    14.5ms   1362.0ms  space-worker                     workflow codexAppServerTurnWorkflow        <- POST /api/demo/turn                    outcome=COMPLETED attempt=1 reason=-
+  +   356.5ms      1.0ms  space-worker                     activity runCodexAppServerTurn             <- workflow codexAppServerTurnWorkflow    outcome=FAILED attempt=1 reason=CODEX_APP_SERVER_UNAVAILABLE
+  +  1371.5ms      0.0ms  space-worker                     activity runCodexAppServerTurn             <- workflow codexAppServerTurnWorkflow    outcome=COMPLETED attempt=2 reason=-
+== memory trace 1dd540033fa6fd84b8d5b96750aaceae (10 spans, services: ['space-api', 'space-memory-maintenance-worker', 'space-memory-mutation-worker'])
+  +     0.0ms    714.9ms  space-api                        POST /api/demo/memory-maintenance          <- (root)                                 outcome=- attempt=- reason=-
+  +     3.3ms    702.0ms  space-memory-maintenance-worker  workflow memoryMaintenanceWorkflow         <- POST /api/demo/memory-maintenance      outcome=COMPLETED attempt=1 reason=-
+  +   316.3ms      0.0ms  space-memory-maintenance-worker  activity refreshMemoryGraphSnapshot        <- workflow memoryMaintenanceWorkflow     outcome=COMPLETED attempt=1 reason=-
+  +   328.3ms      0.0ms  space-memory-maintenance-worker  activity refreshAllMonthsMemoryGraphSnapshot <- workflow memoryMaintenanceWorkflow     outcome=COMPLETED attempt=1 reason=-
+  +   337.3ms      0.0ms  space-memory-maintenance-worker  activity reconcileStaleSpaceAgentSessions  <- workflow memoryMaintenanceWorkflow     outcome=COMPLETED attempt=1 reason=-
+  +   346.3ms      0.0ms  space-memory-maintenance-worker  activity createScheduledMemoryAudit        <- workflow memoryMaintenanceWorkflow     outcome=COMPLETED attempt=1 reason=-
+  +   361.3ms    335.0ms  space-memory-maintenance-worker  workflow memoryConsolidationWorkflow       <- workflow memoryMaintenanceWorkflow     outcome=COMPLETED attempt=1 reason=-
+  +   668.3ms      0.0ms  space-memory-maintenance-worker  activity prepareMemoryConsolidation        <- workflow memoryConsolidationWorkflow   outcome=COMPLETED attempt=1 reason=-
+  +   684.3ms      0.0ms  space-memory-mutation-worker     activity executePersistedMemoryChangeSet   <- workflow memoryConsolidationWorkflow   outcome=COMPLETED attempt=1 reason=-
+  +   693.3ms      1.0ms  space-memory-maintenance-worker  activity finalizeMemoryRepair              <- workflow memoryConsolidationWorkflow   outcome=COMPLETED attempt=1 reason=-
